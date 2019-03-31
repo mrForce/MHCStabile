@@ -1,4 +1,5 @@
 from Bio.PDB import *
+from Bio.PDB.Polypeptide import is_aa
 from Bio import pairwise2
 from Bio.SubsMat import MatrixInfo as matlist
 from Bio.Align.Applications import ClustalOmegaCommandline
@@ -12,6 +13,35 @@ import urllib.request
 from collections import *
 import math
 
+
+
+
+class ContactMapLetters:
+    def __init__(self, contacts):
+        self.characters = '#!$%&()*+,/0123456789;:<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]^~'
+        assert(len(contacts) <= len(self.characters))
+        self.contacts = list(contacts)
+    def contact_to_letter(self, contact):
+        assert(contact in self.contacts)
+        i = self.contacts.index(contact)
+        return self.characters[i]
+    def contacts_to_string(self, contacts):
+        return ''.join([self.contact_to_letter(x) for x in contacts])
+    def create_substitution_matrix(self):
+        """
+        Returns a string you should write to a file.
+        """
+        s = []
+        s.append(' ' + self.characters[0:len(self.contacts)])
+        for x in self.contacts:
+            l = [self.contact_to_letter(x)]
+            for y in self.contacts:
+                l.append(str(len(y.intersection(x)) - 0.5*len(y.symmetric_difference(x))))
+            s.append(l)
+        strings = [' '.join(string) for string in s]
+        return '\n'.join(strings)
+            
+        
 
 def get_uniprot(uniprot_id):
     if ':' in uniprot_id:
@@ -159,7 +189,10 @@ with open('structures.txt', 'r') as f:
             
 mapper.run_alignment('sequences.fasta', 'clustal_output_file.clustal')
 
-z = 0            
+z = 0
+
+peptide_contacts = {}
+
 with open('structures.txt', 'r') as f:
     for line in f:
         line = line.strip()
@@ -175,30 +208,65 @@ with open('structures.txt', 'r') as f:
             chains = {x.id: x for x in structure.get_chains()}
             hla_chain = chains[hla_chains[pdb_id]]
             peptide_chain = chains[peptide_chains[pdb_id]]
+            peptide_sequence = str(PPBuilder().build_peptides(peptide_chain)[0].get_sequence())
             """
             Now that we have both the peptide and HLA chains, and the alignment, iterate 
             """
-            peptide_residues = list(peptide_chain.get_residues())
+            peptide_residues = list(filter(lambda x: is_aa(x), peptide_chain.get_residues()))
             peptide_length = len(peptide_residues)
+            
+            peptide_contact = []
+            assert(peptide_length == len(peptide_sequence))
             if peptide_length in peptide_lengths:
-                hla_residues = list(hla_chain.get_residues())
+                hla_residues = list(filter(lambda x: is_aa(x), hla_chain.get_residues()))
                 i = 0
                 for peptide_residue in peptide_residues:
                     j = 0
+                    position_contact_set = set()
                     for hla_residue in hla_residues:                        
                         if 'CA' in peptide_residue and 'CA' in hla_residue:
                             if abs(peptide_residue['CA'] - hla_residue['CA']) <= 6:
                                 reference_position = mapper.get_reference_position(j, pdb_id)
                                 print('reference position: %d' % reference_position)
                                 contact_map[peptide_length].add((i, reference_position))
+                                position_contact_set.add(reference_position)
                             else:
                                 pass
                                 #print('distance: %f' % abs(peptide_residue['CA'] - hla_residue['CA']))
                         j += 1
                     i += 1
+                    peptide_contact.append(frozenset(position_contact_set))
                 
-            
+                peptide_contacts[pdb_id] = peptide_contact
+                assert(len(peptide_contact) > 0)
+            else:
+                print('peptide length: %d, peptide: %s' % (peptide_length, peptide_sequence))
+                assert(False)
 
+peptide_contact_types = set()
+for pdb_id, peptide_contact in peptide_contacts.items():
+    for x in peptide_contact:
+        assert(isinstance(x, frozenset))
+        peptide_contact_types.add(x)
+print('peptide contact types: %d' % len(peptide_contact_types))
+cml = ContactMapLetters(peptide_contact_types)
+for x in peptide_contact_types:
+    print(x)
+    print(cml.contact_to_letter(x))
+
+sub_matrix = cml.create_substitution_matrix()
+with open('matrix.mat', 'w') as f:
+    f.write(sub_matrix)
+
+with open('contacts.fasta', 'w') as f:    
+    for pdb_id, peptide_contact in peptide_contacts.items():
+        print('peptide_contact')
+        print(peptide_contact)
+        contacts_as_letters = cml.contacts_to_string(peptide_contact)
+        f.write('>%s\n' % pdb_id)
+        f.write('%s\n' % contacts_as_letters)
+
+assert(False)
 for length in peptide_lengths:
     print('peptide length: %d' % length)
     contact_dict = defaultdict(list)
