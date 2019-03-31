@@ -73,7 +73,7 @@ class PositionMapper:
                     self.mapper[pdb_id][i] = chain_counters['reference']
                     chain_counters[pdb_id] += i
             if reference_seq[i] is not '-':
-                chain_counters['reference'] += 0
+                chain_counters['reference'] += 1
     def get_reference_position(self, i, pdb_id):
         return self.mapper[pdb_id][i]
                 
@@ -158,6 +158,7 @@ with open('structures.txt', 'r') as f:
             hla_chains[line.lower()] = best_chain_id
             
 mapper.run_alignment('sequences.fasta', 'clustal_output_file.clustal')
+
 z = 0            
 with open('structures.txt', 'r') as f:
     for line in f:
@@ -177,16 +178,34 @@ with open('structures.txt', 'r') as f:
             """
             Now that we have both the peptide and HLA chains, and the alignment, iterate 
             """
-            peptide_residues = str(peptide_chain.get_residues())
+            peptide_residues = list(peptide_chain.get_residues())
             peptide_length = len(peptide_residues)
             if peptide_length in peptide_lengths:
-                hla_residues = str(hla_chain.get_residues())
+                hla_residues = list(hla_chain.get_residues())
                 i = 0
                 for peptide_residue in peptide_residues:
                     j = 0
-                    for hla_residue in hla_residues:
-                        if 'CA' in peptide_residue and 'CA' in hla_residue and abs(peptide_residue['CA'] - hla_residue['CA']) <= 4:
-                            reference_position = mapper.get_reference_position(j, pdb_id)
-                            contact_map[peptide_length].add((i, reference_position))
+                    for hla_residue in hla_residues:                        
+                        if 'CA' in peptide_residue and 'CA' in hla_residue:
+                            if abs(peptide_residue['CA'] - hla_residue['CA']) <= 6:
+                                reference_position = mapper.get_reference_position(j, pdb_id)
+                                print('reference position: %d' % reference_position)
+                                contact_map[peptide_length].add((i, reference_position))
+                            else:
+                                pass
+                                #print('distance: %f' % abs(peptide_residue['CA'] - hla_residue['CA']))
+                        j += 1
+                    i += 1
                 
             
+
+for length in peptide_lengths:
+    print('peptide length: %d' % length)
+    contact_dict = defaultdict(list)
+    for k,v in list(contact_map[length]):
+        contact_dict[k].append(v)
+        
+    for position in range(0, length):
+        if position in contact_dict:            
+            contacts = [str(x) for x in contact_dict[position]]
+            print('position: %d, contacts: %s' % (position, ', '.join(contacts)))
